@@ -1,43 +1,39 @@
-from smbus2 import SMBusWrapper,i2c_msg
+from smbus import SMBus
 import time
-
+#Set bus to be the default way of interacting with SMBus(1)
+bus = SMBus(1)
 
 #Get the chip ID.  BME280 = 0x60
 def get_id():
-	with SMBusWrapper(1) as bus:
-		chipID_write = i2c_msg.write(0x76, [0xD0])
-		chipID_read = i2c_msg.read(0x76, 1)
-		bus.i2c_rdwr(chipID_write)
-		bus.i2c_rdwr(chipID_read)
-	data = list(chipID_read)
-	return(data[0])
+	bus.write_byte(0x76, 0xD0)
+	id = bus.read_byte(0x76)
+	return(id)
 
 #Reset the device
 def reset():
-	with SMBusWrapper(1) as bus:
-		reset_value = [0xE0, 0xB6]
-		bus.write_i2c_block_data(0x76, 0, reset_value)
+	#reset_value = [0xE0, 0xB6]
+	bus.write_block_data(0x76,0xE0, [0xB6])
+
+#Test read of default values
+def test_read():
+#	bus.write_byte(0x76, 0xD0)
+	data = bus.read_i2c_block_data(0x76, 0xD0, 1)
+	#data = bus.read_byte(0x76)
+	print(data)
 
 #Read the data
 def get_single_reading():
 
-	#Setup as 2x oversampling for pres/temp/hum, no IIR filter, in FORCED mode (wake for single reading)
-	with SMBusWrapper(1) as bus:
-		test_write = i2c_msg.write(0x76, [0xF2, 0x02, 0xF4, 0x49, 0xF2])
-		test_read = i2c_msg.read(0x76, 3)
-		bus.i2c_rdwr(test_write)
-		bus.i2c_rdwr(test_read)
-		setup_write_return = list(test_read)
+	#Setup as 2x oversampling for pres/temp/hum, no IIR filter,
+	# in FORCED mode (wake for single reading)
+	bus.write_i2c_block_data(0x76, 0xF2, [0x02, 0xF4, 0x49])
 
-	#Read the register containing the 8 bytes of pressure/temperature/humidity data
-	with SMBusWrapper(1) as bus:
-		get_data_write = i2c_msg.write(0x76, [0xF7])
-		get_data_read = i2c_msg.read(0x76, 8)
-		bus.i2c_rdwr(get_data_write)
-		bus.i2c_rdwr(get_data_read)
+	#Read the register containing the 8 bytes of pressure
+	#/temperature/humidity data
+	get_data_read = bus.read_i2c_block_data(0x76, 0xF7, 8)
 	#Pass the 8 bytes of data into a list called data
 	data = list(get_data_read)
-	
+#	print(data)
 	#Take the 3 bytes of pressure data, compute to single integer called raw_pressure
 	raw_pressure = (data[0] << 12) + (data[1] << 4) + (data[2] >> 4)
 	#Take the 3 bytes of temp data, compute to single integer called raw_temperature
@@ -49,7 +45,7 @@ def get_single_reading():
 	global trim_consts
 
 	tfine, temperature = complex_temperature(raw_temperature)
-	#pressure = complex_pressure(tfine, raw_pressure)
+	pressure = complex_pressure(tfine, raw_pressure)
 	pressure = simple_pressure(tfine, raw_pressure)
 	humidity = simple_humidity(tfine, raw_humidity)
 	return(temperature, pressure, humidity)
@@ -108,11 +104,11 @@ def simple_pressure(tfine, raw_pressure):
 #Calculate humidity using the "simple" method in the datasheet
 def simple_humidity(tfine, raw_humidity):
 	var_h = tfine - 76800.0
-	var_h = (raw_humidity - (trim_consts['h4'] * 64.0 + trim_consts['h5'] / 16384.0 
+	var_h = (raw_humidity - (trim_consts['h4'] * 64.0 + trim_consts['h5'] / 16384.0
 		* var_h)) * (trim_consts['h2'] / 65536.0 * (1.0 + trim_consts['h6'] /
 		67108864.0 * var_h * (1.0 + trim_consts['h3'] / 67108864.0 * var_h)))
 	humidity = var_h * (1.0 - trim_consts['h1'] * var_h / 524288.0)
-	
+
 	if (humidity > 100.0):
 		humidity = 100.0
 	elif (humidity < 0.0):
@@ -124,12 +120,7 @@ def simple_humidity(tfine, raw_humidity):
 #Get the trim constants for calculating presure/temperature/humidity
 def get_trim_consts():
 	#Get the raw bytes for temperature and pressure constants, but into a list called "data"
-	with SMBusWrapper(1) as bus:
-		get_trim_consts_write = i2c_msg.write(0x76, [0x88])
-		get_trim_consts_read = i2c_msg.read(0x76, 24)
-		bus.i2c_rdwr(get_trim_consts_write)
-		bus.i2c_rdwr(get_trim_consts_read)
-	data = list(get_trim_consts_read)
+	data = bus.read_i2c_block_data(0x76, 0x88, 24)
 
 	#Calculate the temperature constants
 	t1 = (data[1] << 8) | data[0]
@@ -149,24 +140,14 @@ def get_trim_consts():
 
 	#Get and process the humidity constants
 	#Get the first constant byte, put it into a list called h1
-	with SMBusWrapper(1) as bus:
-		get_h1_write = i2c_msg.write(0x76, [0xA1])
-		get_h1_read = i2c_msg.read(0x76, 1)
-		bus.i2c_rdwr(get_h1_write)
-		bus.i2c_rdwr(get_h1_read)
-	h1 = list(get_h1_read)
+	h1 = bus.read_byte_data(0x76, 0xA1)
 
 	#Get the second set of bytes for the constants, put into a list called get_hum_read
 	# (WHY ARE THESE NOT IN CONTIGUOUS REGISTERS?!?!?!?!?!??!?!?!??!?!??!??!??!?!??!??!)
-	with SMBusWrapper(1) as bus:
-		get_hum_write = i2c_msg.write(0x76, [0xE1])
-		get_hum_read = i2c_msg.read(0x76, 7)
-		bus.i2c_rdwr(get_hum_write)
-		bus.i2c_rdwr(get_hum_read)
-	hum = list(get_hum_read)
+	hum = bus.read_i2c_block_data(0x76, 0xE1, 7)
 
 	#Calculate the humidity constants
-	h1 = h1[0]
+
 	h2 = (hum[1] << 8) | hum[0]
 	h3 = hum[2]
 	h4 = (hum[3] << 4) | (hum[4] & 0b00001111)
@@ -189,8 +170,6 @@ def get_trim_consts():
 	#Return the final processed constants
 	return processed_data
 
-
-
 #####################################################################
 #
 # Program actually starts here
@@ -202,14 +181,13 @@ reset()
 
 #Get the trim/compensation values from the device and store as trim_consts
 trim_consts = get_trim_consts()
-
 #Get and print the data on a repeating loop until Ctrl-C
 try:
 	while True:
-		#Get the temperature, pressure and humidity 
+		#Get the temperature, pressure and humidity
 		temperature, pressure, humidity = get_single_reading()
 		#Print each formatted to 2 decimal places
-		print("Temperature = " + str("{:.2f}".format(temperature)) + "*C")				
+		print("Temperature = " + str("{:.2f}".format(temperature)) + "*C")
 		print("Pressure    = " + str("{:.2f}".format(pressure)) + " hPa")
 		print("Humidity    = " + str("{:.2f}".format(humidity)) + " %rH\n")
 		time.sleep(1)
