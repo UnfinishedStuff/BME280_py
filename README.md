@@ -1,6 +1,8 @@
 # BME280_py
 A python script for controlling a BME280 temperature, humidity and pressure sensor with the Raspberry Pi.  
 
+STATUS:  Working, although see the KNOWN ISSUES section for a disclaimer.
+
 This repo has three elements: BME280.py is the script which controls the sensor, weather.py is a very simple script showing you how you can use BME280.py, and README.md is this document which you are reading now.
 
 
